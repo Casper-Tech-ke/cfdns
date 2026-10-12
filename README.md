@@ -43,8 +43,10 @@ A small command-line tool to create and manage Cloudflare DNS records from your 
 Run this on your server:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Casper-Tech-ke/cfdns/main/install.sh | bash
+curl -fsSL https://cfdns.xcasper.space/install | bash
 ```
+
+Prefer GitHub? Use `curl -fsSL https://raw.githubusercontent.com/Casper-Tech-ke/cfdns/main/install.sh | bash` instead.
 
 The installer will:
 
