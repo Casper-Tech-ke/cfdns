@@ -3,46 +3,72 @@ set -euo pipefail
 source /root/.cfdns.env
 API="https://api.cloudflare.com/client/v4"
 Z="$CLOUDFLARE_ZONE_ID"
+
+if [ -t 1 ]; then
+  N='\033[0m'; C='\033[1;36m'; G='\033[1;32m'; R='\033[1;31m'
+  Y='\033[1;33m'; M='\033[1;35m'; W='\033[1;37m'; D='\033[0;90m'
+else N=;C=;G=;R=;Y=;M=;W=;D=; fi
+BW=38
+row() { local t="$1" s="${2:-$1}" l; l=$(( (BW-${#t})/2 )); printf "%*s%b\n" "$l" "" "$s"; }
+banner() {
+  local bar; bar=$(printf '═%.0s' $(seq 1 $BW))
+  printf "${C}%s${N}\n" "$bar"
+  row "CLOUDFLARE DNS RECORDER" "${C}𝗖𝗟𝗢𝗨𝗗𝗙𝗟𝗔𝗥𝗘 𝗗𝗡𝗦 𝗥𝗘𝗖𝗢𝗥𝗗𝗘𝗥${N}"
+  echo
+  row "created & maintained by" "${D}𝘤𝘳𝘦𝘢𝘵𝘦𝘥 & 𝘮𝘢𝘪𝘯𝘵𝘢𝘪𝘯𝘦𝘥 𝘣𝘺${N}"
+  row "XSPACE TECH DEVS" "${M}𝓧𝓢𝓟𝓐𝓒𝓔 𝓣𝓔𝓒𝓗 𝓓𝓔𝓥𝓢${N}"
+  echo
+  row "GitHub: Casper-Tech-ke" "${D}𝗚𝗶𝘁𝗛𝘂𝗯:${N} ${G}𝗖𝗮𝘀𝗽𝗲𝗿-𝗧𝗲𝗰𝗵-𝗸𝗲${N}"
+  printf "${C}%s${N}\n" "$bar"
+}
+res() { local j; j=$(cat); if [ "$(echo "$j" | jq -r '.success')" = "true" ]; then printf "${G}✓${N} %s\n" "$1"; else printf "${R}✗${N} Failed: %s\n" "$(echo "$j" | jq -r '.errors[0].message // "unknown error"')"; exit 1; fi; }
+
 cf() { curl -s -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H "Content-Type: application/json" "$@"; }
 rid() { cf "$API/zones/$Z/dns_records?name=$1" | jq -r '.result[0].id // empty'; }
 confirm() { read -rp "Are you sure you want to $1? (type yes to continue): " ans; [ "$ans" = "yes" ]; }
 
 ZONE=$(cf "$API/zones/$Z" | jq -r '.result.name // empty')
-[ -z "$ZONE" ] && { echo "Could not read your zone. Check your token and Zone ID with: cfdns verify"; exit 1; }
+[ -z "$ZONE" ] && { printf "${R}✗${N} Could not read your zone. Re-run the installer to reset your token and Zone ID.\n"; exit 1; }
 
-# test -> test.zone | @ -> zone | name.zone -> as is | anything else -> refused
 fqdn() {
   local n="${1,,}"; n="${n%.}"
   if [ "$n" = "@" ] || [ "$n" = "$ZONE" ]; then echo "$ZONE"
   elif [[ "$n" == *".$ZONE" ]]; then echo "$n"
   elif [[ "$n" != *.* ]]; then echo "$n.$ZONE"
-  else echo "Refusing: '$1' is outside your zone ($ZONE)." >&2; exit 1
+  else printf "${R}✗${N} Refusing: '%s' is outside your zone (%s).\n" "$1" "$ZONE" >&2; exit 1
   fi
 }
 
 case "${1:-}" in
   verify)
-    cf "$API/user/tokens/verify" | jq '{success, status: .result.status}'
+    cf "$API/user/tokens/verify" | jq -r '"Token status: \(.result.status)"'
     echo "Zone: $ZONE" ;;
   list)
-    cf "$API/zones/$Z/dns_records?per_page=100" | jq -r '.result[] | "\(.type)\t\(.name)\t\(.content)\tproxied=\(.proxied)"' ;;
+    printf "${W}DNS records for %s${N}\n" "$ZONE"
+    cf "$API/zones/$Z/dns_records?per_page=100" | jq -r '.result[] | "\(.type)\t\(.name)\t\(.content)\tproxied=\(.proxied)"' | { column -t -s $'\t' 2>/dev/null || cat; } ;;
   add)
     name=$(fqdn "${2:?usage: cfdns add NAME [CONTENT] [TYPE] [PROXIED]}")
     content=${3:-$(curl -s https://api.ipify.org)}
     type=${4:-A}; proxied=${5:-true}
-    echo "Adding $name -> $content"
-    cf -X POST "$API/zones/$Z/dns_records" --data "$(jq -n --arg t "$type" --arg n "$name" --arg c "$content" --argjson p "$proxied" '{type:$t,name:$n,content:$c,proxied:$p,ttl:1}')" | jq '{success, errors, name: .result.name, content: .result.content}' ;;
+    cf -X POST "$API/zones/$Z/dns_records" --data "$(jq -n --arg t "$type" --arg n "$name" --arg c "$content" --argjson p "$proxied" '{type:$t,name:$n,content:$c,proxied:$p,ttl:1}')" | res "Added $name → $content" ;;
   update)
     name=$(fqdn "${2:?usage: cfdns update NAME CONTENT}"); content=${3:?missing CONTENT}
     confirm "update $name to $content" || { echo "Cancelled."; exit 1; }
-    id=$(rid "$name"); [ -z "$id" ] && { echo "Not found: $name"; exit 1; }
-    cf -X PATCH "$API/zones/$Z/dns_records/$id" --data "$(jq -n --arg c "$content" '{content:$c}')" | jq '{success, errors}' ;;
+    id=$(rid "$name"); [ -z "$id" ] && { printf "${R}✗${N} Not found: %s\n" "$name"; exit 1; }
+    cf -X PATCH "$API/zones/$Z/dns_records/$id" --data "$(jq -n --arg c "$content" '{content:$c}')" | res "Updated $name → $content" ;;
   delete)
     name=$(fqdn "${2:?usage: cfdns delete NAME}")
     confirm "delete $name" || { echo "Cancelled."; exit 1; }
-    id=$(rid "$name"); [ -z "$id" ] && { echo "Not found: $name"; exit 1; }
-    cf -X DELETE "$API/zones/$Z/dns_records/$id" | jq '{success, errors}' ;;
+    id=$(rid "$name"); [ -z "$id" ] && { printf "${R}✗${N} Not found: %s\n" "$name"; exit 1; }
+    cf -X DELETE "$API/zones/$Z/dns_records/$id" | res "Deleted $name" ;;
   *)
-    echo "Usage: cfdns {verify|list|add NAME [CONTENT] [TYPE] [PROXIED]|update NAME CONTENT|delete NAME}"
-    echo "NAME can be short (api), full (api.$ZONE), or @ for the root." ;;
+    banner
+    echo
+    printf "${W}Usage:${N} cfdns <command>\n\n"
+    printf "  ${C}verify${N}                        check token and zone\n"
+    printf "  ${C}list${N}                          show all records\n"
+    printf "  ${C}add${N} NAME [IP] [TYPE] [PROXY]   create a record\n"
+    printf "  ${C}update${N} NAME CONTENT           change a record\n"
+    printf "  ${C}delete${N} NAME                   remove a record\n\n"
+    printf "${D}NAME can be short (api), full (api.%s) or @ for root.${N}\n" "$ZONE" ;;
 esac
