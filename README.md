@@ -10,6 +10,7 @@
 <img src="https://img.shields.io/badge/Cloudflare-DNS-F6821F?logo=cloudflare&logoColor=white" alt="Cloudflare">
 <img src="https://img.shields.io/badge/install-one%20line-36bcf7" alt="one-line install">
 <img src="https://img.shields.io/badge/by-XSPACE%20TECH%20DEVS-c084fc" alt="XSPACE TECH DEVS">
+<img src="https://img.shields.io/badge/license-MIT-green" alt="MIT license">
 
 <br><br>
 
@@ -272,6 +273,14 @@ rm /usr/local/bin/cfdns /root/.cfdns.env
 
 - One zone (domain) per installation
 - Records are managed by name, so use `--type` and `--match` when a name has several
+
+## Security
+
+Found a vulnerability? Please report it privately. See [SECURITY.md](SECURITY.md) for how, what is in scope, and tips for keeping your token safe.
+
+## License
+
+Released under the [MIT License](LICENSE). Copyright (c) 2026 XSPACE TECH DEVS.
 
 ## Acknowledgments
 
