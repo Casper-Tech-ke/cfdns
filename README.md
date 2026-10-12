@@ -80,6 +80,8 @@ cfdns list            # show all records
 | `cfdns update NAME NEWVALUE [flags]` | Changes a record (asks to confirm) |
 | `cfdns proxy NAME [on\|off]` | Shows or switches the proxy |
 | `cfdns delete NAME [flags]` | Removes a record (asks to confirm) |
+| `cfdns site NAME PORT` | Creates the DNS record and Caddy config in one step |
+| `cfdns site list` / `site remove NAME` | Shows or removes sites managed by cfdns |
 
 ### Flags
 
@@ -90,6 +92,7 @@ cfdns list            # show all records
 | `--match TEXT`, `-m TEXT` | Pick one record when a name has several (matches part of its value) |
 | `--proxy`, `-p` | Orange cloud (proxied) |
 | `--dns-only`, `-d` | Grey cloud (DNS only) |
+| `--keep-dns` | With `site remove`: keep the DNS record |
 
 ### Naming
 
@@ -204,27 +207,39 @@ This certificate is trusted by Cloudflare only, so it works for proxied records 
 
 If Caddy can't get its certificate on a brand-new domain, turn the proxy off for a minute (`cfdns proxy myapp off`), let Caddy get the certificate, then turn it back on (`cfdns proxy myapp on`).
 
-## Making a subdomain live (example with Caddy)
+## Making a subdomain live
 
-DNS only points visitors to your server. To serve an app on `myapp.yourdomain.com`:
+One command creates the DNS record, adds the Caddy config, checks it, and reloads Caddy:
 
-1. Create the record:
-   ```bash
-   cfdns add myapp
-   ```
-2. Add this to `/etc/caddy/Caddyfile` (replace the port with your app's port):
+```bash
+cfdns site myapp 3001
+```
+
+That makes `myapp.yourdomain.com` serve whatever app is running on port 3001.
+
+```bash
+cfdns site myapp 3001 --dns-only    # grey cloud instead of proxied
+cfdns site list                     # show sites managed by cfdns
+cfdns site remove myapp             # remove the Caddy block and the DNS record
+cfdns site remove myapp --keep-dns  # remove only the Caddy block
+```
+
+**Requirements:** Caddy installed (`apt install -y caddy`), ports 80 and 443 open on your server, and Cloudflare **SSL/TLS** set to **Full (strict)** (see [Cloudflare SSL/TLS settings](#cloudflare-ssltls-settings)).
+
+**Safety:** `site` asks for confirmation, backs up the Caddyfile to `/etc/caddy/Caddyfile.cfdns.bak`, validates the new config before reloading, and rolls back automatically if Caddy rejects it. It never overwrites an existing hostname or DNS record. Blocks it creates are wrapped in `# cfdns:begin` and `# cfdns:end` markers, so it only removes what it added.
+
+### Doing it by hand
+
+If you prefer manual steps:
+
+1. `cfdns add myapp`
+2. Add to `/etc/caddy/Caddyfile`:
    ```
    myapp.yourdomain.com {
        reverse_proxy localhost:3001
    }
    ```
-3. Reload Caddy:
-   ```bash
-   systemctl reload caddy
-   ```
-4. In Cloudflare, set **SSL/TLS** to **Full (strict)** (see [Cloudflare SSL/TLS settings](#cloudflare-ssltls-settings)).
-
-Make sure ports 80 and 443 are open in your server firewall.
+3. `systemctl reload caddy`
 
 ## Updating
 
