@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+set -euo pipefail
+source /root/.cfdns.env
+API="https://api.cloudflare.com/client/v4"
+Z="$CLOUDFLARE_ZONE_ID"
+cf() { curl -s -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H "Content-Type: application/json" "$@"; }
+rid() { cf "$API/zones/$Z/dns_records?name=$1" | jq -r '.result[0].id // empty'; }
+confirm() { read -rp "Are you sure you want to $1? (type yes to continue): " ans; [ "$ans" = "yes" ]; }
+
+case "${1:-}" in
+  verify)
+    cf "$API/user/tokens/verify" | jq '{success, status: .result.status}' ;;
+  list)
+    cf "$API/zones/$Z/dns_records?per_page=100" | jq -r '.result[] | "\(.type)\t\(.name)\t\(.content)\tproxied=\(.proxied)"' ;;
+  add)
+    name=${2:?usage: cfdns add NAME [CONTENT] [TYPE] [PROXIED]}
+    content=${3:-$(curl -s https://api.ipify.org)}
+    type=${4:-A}; proxied=${5:-true}
+    cf -X POST "$API/zones/$Z/dns_records" --data "$(jq -n --arg t "$type" --arg n "$name" --arg c "$content" --argjson p "$proxied" '{type:$t,name:$n,content:$c,proxied:$p,ttl:1}')" | jq '{success, errors, name: .result.name, content: .result.content}' ;;
+  update)
+    name=${2:?usage: cfdns update NAME CONTENT}; content=${3:?missing CONTENT}
+    confirm "update $name to $content" || { echo "Cancelled."; exit 1; }
+    id=$(rid "$name"); [ -z "$id" ] && { echo "Not found: $name"; exit 1; }
+    cf -X PATCH "$API/zones/$Z/dns_records/$id" --data "$(jq -n --arg c "$content" '{content:$c}')" | jq '{success, errors}' ;;
+  delete)
+    name=${2:?usage: cfdns delete NAME}
+    confirm "delete $name" || { echo "Cancelled."; exit 1; }
+    id=$(rid "$name"); [ -z "$id" ] && { echo "Not found: $name"; exit 1; }
+    cf -X DELETE "$API/zones/$Z/dns_records/$id" | jq '{success, errors}' ;;
+  *)
+    echo "Usage: cfdns {verify|list|add NAME [CONTENT] [TYPE] [PROXIED]|update NAME CONTENT|delete NAME}" ;;
+esac
