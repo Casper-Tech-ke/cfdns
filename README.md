@@ -273,6 +273,10 @@ rm /usr/local/bin/cfdns /root/.cfdns.env
 - One zone (domain) per installation
 - Records are managed by name, so use `--type` and `--match` when a name has several
 
+## Acknowledgments
+
+See [ACKNOWLEDGMENTS.md](ACKNOWLEDGMENTS.md) for credits and the tools this project is built on.
+
 <div align="center">
 
 ---
