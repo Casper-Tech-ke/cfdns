@@ -22,10 +22,25 @@ banner() {
   printf "${C}%s${N}\n" "$bar"
 }
 res() { local j; j=$(cat); if [ "$(echo "$j" | jq -r '.success')" = "true" ]; then printf "${G}✓${N} %s\n" "$1"; else printf "${R}✗${N} Failed: %s\n" "$(echo "$j" | jq -r '.errors[0].message // "unknown error"')"; exit 1; fi; }
+mode() { if [ "$1" = "true" ]; then echo "proxied (orange cloud)"; else echo "DNS only (grey cloud)"; fi; }
 
 cf() { curl -s -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H "Content-Type: application/json" "$@"; }
 rid() { cf "$API/zones/$Z/dns_records?name=$1" | jq -r '.result[0].id // empty'; }
 confirm() { read -rp "Are you sure you want to $1? (type yes to continue): " ans; [ "$ans" = "yes" ]; }
+
+PROXY=""; TYPE=""; POS=()
+parse() {
+  POS=()
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --proxy|--proxied|-p) PROXY=true ;;
+      --dns-only|--no-proxy|-d) PROXY=false ;;
+      --type|-t) TYPE="${2:?--type needs a value}"; shift ;;
+      *) POS+=("$1") ;;
+    esac
+    shift
+  done
+}
 
 ZONE=$(cf "$API/zones/$Z" | jq -r '.result.name // empty')
 [ -z "$ZONE" ] && { printf "${R}✗${N} Could not read your zone. Re-run the installer to reset your token and Zone ID.\n"; exit 1; }
@@ -45,17 +60,34 @@ case "${1:-}" in
     echo "Zone: $ZONE" ;;
   list)
     printf "${W}DNS records for %s${N}\n" "$ZONE"
-    cf "$API/zones/$Z/dns_records?per_page=100" | jq -r '.result[] | "\(.type)\t\(.name)\t\(.content)\tproxied=\(.proxied)"' | { column -t -s $'\t' 2>/dev/null || cat; } ;;
+    cf "$API/zones/$Z/dns_records?per_page=100" | jq -r '.result[] | "\(.type)\t\(.name)\t\(.content)\t\(if .proxied then "proxied" else "dns-only" end)"' | { column -t -s $'\t' 2>/dev/null || cat; } ;;
   add)
-    name=$(fqdn "${2:?usage: cfdns add NAME [CONTENT] [TYPE] [PROXIED]}")
-    content=${3:-$(curl -s https://api.ipify.org)}
-    type=${4:-A}; proxied=${5:-true}
-    cf -X POST "$API/zones/$Z/dns_records" --data "$(jq -n --arg t "$type" --arg n "$name" --arg c "$content" --argjson p "$proxied" '{type:$t,name:$n,content:$c,proxied:$p,ttl:1}')" | res "Added $name → $content" ;;
+    parse "${@:2}"
+    name=$(fqdn "${POS[0]:?usage: cfdns add NAME [IP] [--proxy|--dns-only] [--type TYPE]}")
+    type=${TYPE:-A}
+    content=${POS[1]:-$(curl -s https://api.ipify.org)}
+    if [ -n "$PROXY" ]; then proxied=$PROXY; else case "$type" in A|AAAA|CNAME) proxied=true ;; *) proxied=false ;; esac; fi
+    cf -X POST "$API/zones/$Z/dns_records" --data "$(jq -n --arg t "$type" --arg n "$name" --arg c "$content" --argjson p "$proxied" '{type:$t,name:$n,content:$c,proxied:$p,ttl:1}')" | res "Added $name → $content [$(mode "$proxied")]" ;;
   update)
-    name=$(fqdn "${2:?usage: cfdns update NAME CONTENT}"); content=${3:?missing CONTENT}
+    parse "${@:2}"
+    name=$(fqdn "${POS[0]:?usage: cfdns update NAME CONTENT [--proxy|--dns-only]}"); content=${POS[1]:?missing CONTENT}
     confirm "update $name to $content" || { echo "Cancelled."; exit 1; }
     id=$(rid "$name"); [ -z "$id" ] && { printf "${R}✗${N} Not found: %s\n" "$name"; exit 1; }
-    cf -X PATCH "$API/zones/$Z/dns_records/$id" --data "$(jq -n --arg c "$content" '{content:$c}')" | res "Updated $name → $content" ;;
+    body=$(jq -n --arg c "$content" '{content:$c}')
+    [ -n "$PROXY" ] && body=$(echo "$body" | jq --argjson p "$PROXY" '. + {proxied:$p}')
+    cf -X PATCH "$API/zones/$Z/dns_records/$id" --data "$body" | res "Updated $name → $content" ;;
+  proxy)
+    name=$(fqdn "${2:?usage: cfdns proxy NAME [on|off]}")
+    rec=$(cf "$API/zones/$Z/dns_records?name=$name" | jq -c '.result[0] // empty')
+    [ -z "$rec" ] && { printf "${R}✗${N} Not found: %s\n" "$name"; exit 1; }
+    id=$(echo "$rec" | jq -r '.id'); cur=$(echo "$rec" | jq -r '.proxied')
+    case "${3:-}" in
+      on|true|proxy) want=true ;;
+      off|false|dns) want=false ;;
+      "") printf "%s is %s\n" "$name" "$(mode "$cur")"; exit 0 ;;
+      *) printf "${R}✗${N} Use: cfdns proxy NAME on|off\n"; exit 1 ;;
+    esac
+    cf -X PATCH "$API/zones/$Z/dns_records/$id" --data "$(jq -n --argjson p "$want" '{proxied:$p}')" | res "$name is now $(mode "$want")" ;;
   delete)
     name=$(fqdn "${2:?usage: cfdns delete NAME}")
     confirm "delete $name" || { echo "Cancelled."; exit 1; }
@@ -65,10 +97,12 @@ case "${1:-}" in
     banner
     echo
     printf "${W}Usage:${N} cfdns <command>\n\n"
-    printf "  ${C}verify${N}                        check token and zone\n"
-    printf "  ${C}list${N}                          show all records\n"
-    printf "  ${C}add${N} NAME [IP] [TYPE] [PROXY]   create a record\n"
-    printf "  ${C}update${N} NAME CONTENT           change a record\n"
-    printf "  ${C}delete${N} NAME                   remove a record\n\n"
+    printf "  ${C}verify${N}                         check token and zone\n"
+    printf "  ${C}list${N}                           show all records\n"
+    printf "  ${C}add${N} NAME [IP] [flags]           create a record\n"
+    printf "  ${C}update${N} NAME CONTENT [flags]    change a record\n"
+    printf "  ${C}proxy${N} NAME [on|off]            show or switch the proxy\n"
+    printf "  ${C}delete${N} NAME                    remove a record\n\n"
+    printf "${W}Flags:${N} --proxy  --dns-only  --type TYPE\n\n"
     printf "${D}NAME can be short (api), full (api.%s) or @ for root.${N}\n" "$ZONE" ;;
 esac
