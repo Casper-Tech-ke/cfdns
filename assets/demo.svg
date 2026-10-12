@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="300" viewBox="0 0 720 300">
+  <rect width="720" height="300" rx="10" fill="#0d1117"/>
+  <rect width="720" height="34" rx="10" fill="#161b22"/>
+  <rect y="20" width="720" height="14" fill="#161b22"/>
+  <circle cx="22" cy="17" r="6" fill="#ff5f56"/>
+  <circle cx="42" cy="17" r="6" fill="#ffbd2e"/>
+  <circle cx="62" cy="17" r="6" fill="#27c93f"/>
+  <text x="360" y="22" text-anchor="middle" font-family="monospace" font-size="13" fill="#8b949e">root@xcasper: ~</text>
+  <g font-family="Menlo, Consolas, monospace" font-size="15">
+    <text x="20" y="72" opacity="0"><tspan fill="#3fb950">$</tspan><tspan fill="#58a6ff"> cfdns add myapp</tspan>
+      <animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0;0.0357;0.0571;0.93;1" dur="14s" repeatCount="indefinite"/></text>
+    <text x="20" y="96" opacity="0"><tspan fill="#3fb950">✓</tspan><tspan fill="#c9d1d9"> Added A myapp.example.com → 203.0.113.10 [proxied]</tspan>
+      <animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0;0.1429;0.1643;0.93;1" dur="14s" repeatCount="indefinite"/></text>
+    <text x="20" y="132" opacity="0"><tspan fill="#3fb950">$</tspan><tspan fill="#58a6ff"> cfdns proxy myapp off</tspan>
+      <animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0;0.25;0.2714;0.93;1" dur="14s" repeatCount="indefinite"/></text>
+    <text x="20" y="156" opacity="0"><tspan fill="#3fb950">✓</tspan><tspan fill="#c9d1d9"> myapp.example.com is now DNS only (grey cloud)</tspan>
+      <animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0;0.3571;0.3786;0.93;1" dur="14s" repeatCount="indefinite"/></text>
+    <text x="20" y="192" opacity="0"><tspan fill="#3fb950">$</tspan><tspan fill="#58a6ff"> cfdns add @ mx.mail.com --type MX</tspan>
+      <animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0;0.4643;0.4857;0.93;1" dur="14s" repeatCount="indefinite"/></text>
+    <text x="20" y="216" opacity="0"><tspan fill="#3fb950">✓</tspan><tspan fill="#c9d1d9"> Added MX example.com → mx.mail.com (priority 10)</tspan>
+      <animate attributeName="opacity" values="0;0;1;1;0" keyTimes="0;0.5714;0.5929;0.93;1" dur="14s" repeatCount="indefinite"/></text>
+    <text x="20" y="252"><tspan fill="#3fb950">$</tspan></text>
+    <rect x="36" y="238" width="9" height="17" fill="#c9d1d9">
+      <animate attributeName="opacity" values="1;0;1" dur="1s" repeatCount="indefinite"/>
+    </rect>
+  </g>
+</svg>

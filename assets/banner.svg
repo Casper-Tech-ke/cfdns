@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="180" viewBox="0 0 800 180">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="0" spreadMethod="reflect">
+      <stop offset="0" stop-color="#f6821f"/>
+      <stop offset="0.5" stop-color="#36bcf7"/>
+      <stop offset="1" stop-color="#c084fc"/>
+      <animateTransform attributeName="gradientTransform" type="translate" from="-1 0" to="1 0" dur="4s" repeatCount="indefinite"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="10" width="800" height="3" fill="url(#g)"/>
+  <rect x="0" y="17" width="800" height="3" fill="url(#g)"/>
+  <text x="400" y="78" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="42" font-weight="800" letter-spacing="4" fill="url(#g)">CLOUDFLARE DNS RECORDER</text>
+  <text x="400" y="110" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="15" font-style="italic" fill="#8b949e">created &amp; maintained by</text>
+  <text x="400" y="140" text-anchor="middle" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="24" font-weight="800" letter-spacing="6" fill="#c084fc">
+    XSPACE TECH DEVS
+    <animate attributeName="opacity" values="1;0.55;1" dur="3s" repeatCount="indefinite"/>
+  </text>
+  <rect x="0" y="160" width="800" height="3" fill="url(#g)"/>
+  <rect x="0" y="167" width="800" height="3" fill="url(#g)"/>
+</svg>
