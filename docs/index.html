@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>cfdns · Cloudflare DNS Recorder</title>
+<meta name="description" content="Manage Cloudflare DNS records and put apps live with Caddy from your terminal.">
+<style>
+:root{--bg:#0b0f17;--card:#121826;--line:#232c3f;--txt:#d7deea;--mut:#8b96a9;--o:#f6821f;--b:#36bcf7;--p:#c084fc;--g:#3fb950;--code:#0a0d14}
+@media(prefers-color-scheme:light){:root{--bg:#f6f8fb;--card:#fff;--line:#dfe5ee;--txt:#1b2333;--mut:#5b667a;--code:#0f1623}}
+*{box-sizing:border-box}html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--txt);font:16px/1.65 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+a{color:var(--b);text-decoration:none}a:hover{text-decoration:underline}
+.wrap{max-width:920px;margin:0 auto;padding:0 20px}
+nav{position:sticky;top:0;z-index:5;background:var(--bg);border-bottom:1px solid var(--line)}
+nav .wrap{display:flex;gap:18px;align-items:center;overflow-x:auto;white-space:nowrap;padding:12px 20px}
+nav a{color:var(--mut);font-size:14px}nav b{color:var(--b)}
+.rule{height:3px;margin:6px 0;background:linear-gradient(90deg,var(--o),var(--b),var(--p),var(--o));background-size:200% 100%;animation:flow 4s linear infinite}
+@keyframes flow{to{background-position:-200% 0}}
+.hero{text-align:center;padding:40px 0 28px}
+h1{font-size:clamp(24px,6vw,44px);letter-spacing:.06em;margin:22px 0 6px;font-weight:800;background:linear-gradient(90deg,var(--o),var(--b),var(--p),var(--o));background-size:200% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;animation:flow 6s linear infinite}
+.by{color:var(--mut);font-style:italic;margin:0}
+.team{color:var(--p);font-weight:800;letter-spacing:.3em;margin:4px 0 18px}
+.tag{color:var(--mut);max-width:560px;margin:0 auto 18px}
+section{padding:28px 0;border-top:1px solid var(--line)}
+h2{margin:0 0 12px;font-size:24px}h3{margin:22px 0 8px;font-size:17px;color:var(--b)}
+pre{position:relative;background:var(--code);color:#d7deea;border:1px solid var(--line);border-radius:10px;padding:14px 70px 14px 16px;overflow-x:auto;font:14px/1.6 ui-monospace,Menlo,Consolas,monospace;margin:10px 0;text-align:left}
+pre button{position:absolute;top:8px;right:8px;background:#1b2436;color:#9fb0cc;border:1px solid #2a3550;border-radius:6px;font-size:12px;padding:3px 9px;cursor:pointer}
+pre button:hover{color:#fff}.c{color:#6b7a94}
+code{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.92em;background:rgba(54,188,247,.13);padding:1px 6px;border-radius:5px}
+pre code{background:none;padding:0}
+.t{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:15px}
+th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+th{color:var(--mut);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.05em}
+.grid{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(220px,1fr))}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+.card b{display:block;margin-bottom:4px}
+.ok{color:var(--g)}.no{color:var(--o)}
+footer{border-top:1px solid var(--line);text-align:center;padding:26px 0 40px;color:var(--mut);font-size:14px}
+</style></head><body>
+<nav><div class="wrap"><b>cfdns</b><a href="#install">Install</a><a href="#commands">Commands</a><a href="#examples">Examples</a><a href="#live">Go live</a><a href="#ssl">SSL/TLS</a><a href="#safety">Safety</a><a href="#help">Help</a><a href="https://github.com/Casper-Tech-ke/cfdns">GitHub</a></div></nav>
+
+<header class="hero"><div class="wrap">
+<div class="rule"></div><div class="rule"></div>
+<h1>CLOUDFLARE DNS RECORDER</h1>
+<p class="by">created &amp; maintained by</p>
+<p class="team">XSPACE TECH DEVS</p>
+<p class="tag">Manage Cloudflare DNS records and put apps live with Caddy, straight from your server's terminal.</p>
+<pre>curl -fsSL https://raw.githubusercontent.com/Casper-Tech-ke/cfdns/main/install.sh | bash</pre>
+<div class="rule"></div><div class="rule"></div>
+</div></header>
+
+<main class="wrap">
+<section id="install"><h2>Install</h2>
+<p>Run the one-liner above on a Debian or Ubuntu server as root. It installs <code>jq</code> and <code>curl</code>, installs the <code>cfdns</code> command, then asks for two things:</p>
+<div class="grid">
+<div class="card"><b>API token</b>Create one at <a href="https://dash.cloudflare.com/profile/api-tokens">dash.cloudflare.com/profile/api-tokens</a> with the <i>Edit zone DNS</i> template, limited to your domain.</div>
+<div class="card"><b>Zone ID</b>On your domain's <i>Overview</i> page in Cloudflare, in the right sidebar under <i>API</i>.</div>
+</div>
+<p>Both are saved only on your server in <code>/root/.cfdns.env</code> (permissions 600), never in the repository. Then try:</p>
+<pre>cfdns verify
+cfdns list</pre></section>
+
+<section id="commands"><h2>Commands</h2>
+<div class="t"><table>
+<tr><th>Command</th><th>What it does</th></tr>
+<tr><td><code>cfdns verify</code></td><td>Check the token and show the zone</td></tr>
+<tr><td><code>cfdns list</code></td><td>List all records with type, value, proxy status, priority</td></tr>
+<tr><td><code>cfdns add NAME [VALUE]</code></td><td>Create a record</td></tr>
+<tr><td><code>cfdns update NAME NEWVALUE</code></td><td>Change a record (asks to confirm)</td></tr>
+<tr><td><code>cfdns proxy NAME [on|off]</code></td><td>Show or switch the orange/grey cloud</td></tr>
+<tr><td><code>cfdns delete NAME</code></td><td>Remove a record (asks to confirm)</td></tr>
+<tr><td><code>cfdns site NAME PORT</code></td><td>DNS record + Caddy config, go live in one step</td></tr>
+<tr><td><code>cfdns site list</code> / <code>site remove NAME</code></td><td>Show or take down sites managed by cfdns</td></tr>
+</table></div>
+<h3>Flags</h3>
+<div class="t"><table>
+<tr><th>Flag</th><th>Meaning</th></tr>
+<tr><td><code>--type T</code></td><td>Record type: A, AAAA, CNAME, TXT, MX… (default A)</td></tr>
+<tr><td><code>--priority N</code></td><td>MX priority (default 10)</td></tr>
+<tr><td><code>--match TEXT</code></td><td>Pick one record when a name has several</td></tr>
+<tr><td><code>--proxy</code> / <code>--dns-only</code></td><td>Orange cloud / grey cloud</td></tr>
+<tr><td><code>--keep-dns</code></td><td>With <code>site remove</code>: keep the DNS record</td></tr>
+</table></div>
+<p><code>NAME</code> can be short (<code>api</code>), full (<code>api.yourdomain.com</code>) or <code>@</code> for the root domain.</p></section>
+
+<section id="examples"><h2>Examples</h2>
+<h3>A and CNAME records</h3>
+<pre>cfdns add myapp                    <span class="c"># this server's IP, proxied</span>
+cfdns add myapp --dns-only         <span class="c"># grey cloud</span>
+cfdns add myapp 1.2.3.4 --proxy
+cfdns add www yourdomain.com --type CNAME</pre>
+<h3>TXT and MX records</h3>
+<pre>cfdns add @ "v=spf1 include:mailgun.org ~all" --type TXT
+cfdns add _dmarc "v=DMARC1; p=none" --type TXT
+cfdns add @ mx.example.com --type MX --priority 10</pre>
+<h3>Proxy</h3>
+<pre>cfdns proxy myapp          <span class="c"># show state</span>
+cfdns proxy myapp on       <span class="c"># orange cloud</span>
+cfdns proxy myapp off      <span class="c"># grey cloud</span></pre>
+<h3>One of several records</h3>
+<p>A name like <code>@</code> can hold many records. Say which one you mean:</p>
+<pre>cfdns update @ "v=spf1 -all" --type TXT --match spf1
+cfdns delete @ --type MX --match mx2</pre></section>
+
+<section id="live"><h2>Go live</h2>
+<p>One command makes an app reachable on its own subdomain:</p>
+<pre>cfdns site myapp 3001</pre>
+<div class="grid">
+<div class="card"><b class="ok">1 · Caddy</b>Adds a reverse-proxy block for <code>myapp.yourdomain.com</code> to your port.</div>
+<div class="card"><b class="ok">2 · Check</b>Backs up the Caddyfile and validates it. Rolls back if Caddy rejects it.</div>
+<div class="card"><b class="ok">3 · Reload</b>Reloads Caddy, which gets the HTTPS certificate on its own.</div>
+<div class="card"><b class="ok">4 · DNS</b>Creates the A record to your server (proxied unless <code>--dns-only</code>).</div>
+</div>
+<pre>cfdns site list
+cfdns site remove myapp
+cfdns site remove myapp --keep-dns</pre>
+<p>Needs Caddy installed (<code>apt install -y caddy</code>) and ports 80 and 443 open.</p></section>
+
+<section id="ssl"><h2>Cloudflare SSL/TLS</h2>
+<p>These are set in the Cloudflare dashboard under <i>SSL/TLS → Overview</i>. They matter for proxied (orange cloud) records.</p>
+<div class="t"><table>
+<tr><th>Mode</th><th>Behavior</th><th>Use it?</th></tr>
+<tr><td>Off</td><td>No encryption</td><td class="no">No</td></tr>
+<tr><td>Flexible</td><td>Plain HTTP to your server; causes redirect loops with Caddy</td><td class="no">No</td></tr>
+<tr><td>Full</td><td>Encrypted, any certificate accepted</td><td>Temporary fallback</td></tr>
+<tr><td><b>Full (strict)</b></td><td>Encrypted, certificate must be valid</td><td class="ok"><b>Yes, recommended</b></td></tr>
+</table></div>
+<p>Under <i>Edge Certificates</i>, also turn on <b>Always Use HTTPS</b> and <b>Automatic HTTPS Rewrites</b>, and set <b>Minimum TLS Version</b> to 1.2.</p></section>
+
+<section id="safety"><h2>Safety</h2>
+<div class="grid">
+<div class="card"><b>Zone guard</b>Names outside your domain are refused.</div>
+<div class="card"><b>Confirmation</b>Update, delete and site changes show what will change and wait for <code>yes</code>.</div>
+<div class="card"><b>No guessing</b>If a name matches several records, nothing is changed.</div>
+<div class="card"><b>Private token</b>Stored only on your server, never sent anywhere but Cloudflare.</div>
+</div>
+<p>Found a vulnerability? Read the <a href="https://github.com/Casper-Tech-ke/cfdns/blob/main/SECURITY.md">security policy</a>.</p></section>
+
+<section id="help"><h2>Troubleshooting</h2>
+<div class="t"><table>
+<tr><th>Problem</th><th>Fix</th></tr>
+<tr><td><code>Could not read your zone</code></td><td>Re-run the installer with a valid token and Zone ID</td></tr>
+<tr><td><code>outside your zone</code></td><td>Use a short name or one ending in your domain</td></tr>
+<tr><td><code>has N matching records</code></td><td>Add <code>--type</code> and/or <code>--match</code></td></tr>
+<tr><td><code>Authentication error</code></td><td>Create a new token with the Edit zone DNS template</td></tr>
+<tr><td>502</td><td>The app isn't running on that port. Check <code>pm2 status</code></td></tr>
+<tr><td>521</td><td>Cloudflare can't reach the server. Check Caddy and ports 80/443</td></tr>
+<tr><td>525 / 526</td><td>Certificate problem. Use Full (strict) and wait for Caddy's certificate</td></tr>
+<tr><td>Too many redirects</td><td>SSL mode is Flexible. Switch to Full (strict)</td></tr>
+</table></div></section>
+</main>
+
+<footer><div class="wrap">
+<div class="rule"></div>
+<p class="team">XSPACE TECH DEVS</p>
+<p><a href="https://github.com/Casper-Tech-ke/cfdns">GitHub</a> · <a href="https://github.com/Casper-Tech-ke/cfdns/blob/main/LICENSE">MIT License</a> · <a href="https://github.com/Casper-Tech-ke/cfdns/blob/main/SECURITY.md">Security</a> · <a href="https://github.com/Casper-Tech-ke/cfdns/blob/main/ACKNOWLEDGMENTS.md">Acknowledgments</a></p>
+<p>Created &amp; maintained by XSPACE TECH DEVS · GitHub: <a href="https://github.com/Casper-Tech-ke">Casper-Tech-ke</a></p>
+</div></footer>
+
+<script>
+document.querySelectorAll('pre').forEach(function(p){
+  var t=p.innerText.trim(),b=document.createElement('button');
+  b.textContent='Copy';
+  b.onclick=function(){navigator.clipboard.writeText(t).then(function(){b.textContent='Copied';setTimeout(function(){b.textContent='Copy'},1500)})};
+  p.appendChild(b);
+});
+</script>
+</body></html>

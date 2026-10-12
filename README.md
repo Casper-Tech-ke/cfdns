@@ -16,6 +16,8 @@
 
 A small command-line tool to create and manage Cloudflare DNS records from your server's terminal.
 
+**Docs:** https://cfdns.xcasper.space
+
 <img src="assets/demo.svg" alt="cfdns demo" width="720">
 
 </div>
