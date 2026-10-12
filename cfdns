@@ -3,6 +3,7 @@ set -euo pipefail
 source /root/.cfdns.env
 API="https://api.cloudflare.com/client/v4"
 Z="$CLOUDFLARE_ZONE_ID"
+CADDYFILE="/etc/caddy/Caddyfile"
 
 if [ -t 1 ]; then
   N='\033[0m'; C='\033[1;36m'; G='\033[1;32m'; R='\033[1;31m'
@@ -28,7 +29,7 @@ err() { printf "${R}✗${N} %s\n" "$1" >&2; exit 1; }
 cf() { curl -s -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H "Content-Type: application/json" "$@"; }
 confirm() { read -rp "Are you sure you want to $1? (type yes to continue): " ans; [ "$ans" = "yes" ]; }
 
-PROXY=""; TYPE=""; PRIO=""; MATCH=""; POS=()
+PROXY=""; TYPE=""; PRIO=""; MATCH=""; KEEP=""; POS=()
 parse() {
   POS=()
   while [ $# -gt 0 ]; do
@@ -38,6 +39,7 @@ parse() {
       --type|-t) TYPE="${2:?--type needs a value}"; shift ;;
       --priority|--prio) PRIO="${2:?--priority needs a number}"; shift ;;
       --match|-m) MATCH="${2:?--match needs text}"; shift ;;
+      --keep-dns) KEEP=1 ;;
       *) POS+=("$1") ;;
     esac
     shift
@@ -56,12 +58,10 @@ fqdn() {
   fi
 }
 
-# rows of: id <TAB> type <TAB> content, filtered by --type and --match
 find() {
   cf "$API/zones/$Z/dns_records?name=$1&per_page=100${TYPE:+&type=${TYPE^^}}" \
     | jq -r --arg m "$MATCH" '.result[] | select($m=="" or (.content|contains($m))) | [.id,.type,.content] | @tsv'
 }
-# exactly one record, or stop and show the candidates
 pick() {
   local rows n
   rows=$(find "$1"); n=$(printf "%s" "$rows" | grep -c . || true)
@@ -72,6 +72,23 @@ pick() {
     exit 1
   fi
   printf "%s\n" "$rows"
+}
+
+# --- Caddy helpers (used by the site command) ---
+need_caddy() {
+  command -v caddy >/dev/null 2>&1 || err "Caddy is not installed. Run: apt install -y caddy"
+  [ -f "$CADDYFILE" ] || err "$CADDYFILE not found."
+}
+caddy_backup()  { cp "$CADDYFILE" "$CADDYFILE.cfdns.bak"; }
+caddy_restore() { cp "$CADDYFILE.cfdns.bak" "$CADDYFILE"; }
+caddy_apply() {
+  if ! caddy validate --config "$CADDYFILE" --adapter caddyfile >/dev/null 2>&1; then
+    caddy_restore; err "Caddy rejected the new config. Change rolled back, nothing was changed."
+  fi
+  if ! systemctl reload caddy; then
+    caddy_restore; systemctl reload caddy || true
+    err "Caddy failed to reload. Change rolled back."
+  fi
 }
 
 case "${1:-}" in
@@ -125,6 +142,66 @@ case "${1:-}" in
     IFS=$'\t' read -r id rtype rcontent <<< "$(pick "$name")"
     confirm "delete $rtype $name ($rcontent)" || { echo "Cancelled."; exit 1; }
     cf -X DELETE "$API/zones/$Z/dns_records/$id" | res "Deleted $rtype $name" ;;
+  site)
+    sub="${2:-}"
+    case "$sub" in
+      add|remove|rm|list|ls) args=("${@:3}") ;;
+      "") err "usage: cfdns site NAME PORT | cfdns site remove NAME | cfdns site list" ;;
+      *) sub=add; args=("${@:2}") ;;
+    esac
+    need_caddy
+    case "$sub" in
+      add)
+        parse "${args[@]}"
+        name=$(fqdn "${POS[0]:?usage: cfdns site NAME PORT [--dns-only]}")
+        port="${POS[1]:?usage: cfdns site NAME PORT [--dns-only]}"
+        { [[ "$port" =~ ^[0-9]+$ ]] && [ "$port" -ge 1 ] && [ "$port" -le 65535 ]; } || err "Port must be a number between 1 and 65535."
+        esc=${name//./\\.}
+        grep -qiE "^(# cfdns:begin )?${esc}([[:space:],{]|$)" "$CADDYFILE" && err "$name is already in $CADDYFILE. Use: cfdns site list"
+        ss -tln | awk '{print $4}' | grep -qE "[:.]${port}$" || printf "${Y}!${N} Nothing is listening on port %s yet. The site shows 502 until your app starts.\n" "$port"
+        confirm "make $name live (DNS record + Caddy → localhost:$port)" || { echo "Cancelled."; exit 1; }
+        caddy_backup
+        {
+          echo ""
+          echo "# cfdns:begin $name"
+          echo "$name {"
+          echo "    reverse_proxy localhost:$port"
+          echo "}"
+          echo "# cfdns:end $name"
+        } >> "$CADDYFILE"
+        caddy_apply
+        printf "${G}✓${N} Caddy: %s → localhost:%s\n" "$name" "$port"
+        existing=$(cf "$API/zones/$Z/dns_records?name=$name&type=A" | jq -r '.result[0].content // empty')
+        if [ -n "$existing" ]; then
+          printf "${G}✓${N} DNS: A record already exists (%s), left unchanged\n" "$existing"
+        else
+          ip=$(curl -s https://api.ipify.org); proxied=${PROXY:-true}
+          cf -X POST "$API/zones/$Z/dns_records" --data "$(jq -n --arg n "$name" --arg c "$ip" --argjson p "$proxied" '{type:"A",name:$n,content:$c,proxied:$p,ttl:1}')" | res "DNS: added A $name → $ip [$(mode "$proxied")]"
+        fi
+        echo
+        printf "${W}Live soon at:${N} ${C}https://%s${N}\n" "$name"
+        printf "${D}Cloudflare SSL/TLS mode should be Full (strict). The first visit can take a few seconds while Caddy gets its certificate.${N}\n" ;;
+      remove|rm)
+        parse "${args[@]}"
+        name=$(fqdn "${POS[0]:?usage: cfdns site remove NAME [--keep-dns]}")
+        esc=${name//./\\.}
+        grep -q "^# cfdns:begin ${esc}\$" "$CADDYFILE" || err "$name was not added by 'cfdns site', so it is not removed automatically. Edit $CADDYFILE by hand."
+        if [ -n "$KEEP" ]; then confirm "remove $name from Caddy (DNS kept)" || { echo "Cancelled."; exit 1; }
+        else confirm "remove $name from Caddy and delete its DNS A record" || { echo "Cancelled."; exit 1; }; fi
+        caddy_backup
+        sed -i "/^# cfdns:begin ${esc}\$/,/^# cfdns:end ${esc}\$/d" "$CADDYFILE"
+        caddy_apply
+        printf "${G}✓${N} Caddy: removed %s\n" "$name"
+        if [ -z "$KEEP" ]; then
+          id=$(cf "$API/zones/$Z/dns_records?name=$name&type=A" | jq -r '.result[0].id // empty')
+          if [ -n "$id" ]; then cf -X DELETE "$API/zones/$Z/dns_records/$id" | res "DNS: deleted A $name"
+          else printf "${D}DNS: no A record found for %s${N}\n" "$name"; fi
+        fi ;;
+      list|ls)
+        printf "${W}Sites managed by cfdns${N}\n"
+        out=$(awk '/^# cfdns:begin /{h=$3} h && /reverse_proxy/{print h"\t"$2; h=""}' "$CADDYFILE")
+        if [ -z "$out" ]; then echo "(none yet)"; else printf "%s\n" "$out" | { column -t -s $'\t' 2>/dev/null || cat; }; fi ;;
+    esac ;;
   *)
     banner
     echo
@@ -134,8 +211,11 @@ case "${1:-}" in
     printf "  ${C}add${N} NAME [VALUE] [flags]         create a record\n"
     printf "  ${C}update${N} NAME NEWVALUE [flags]    change a record\n"
     printf "  ${C}proxy${N} NAME [on|off]             show or switch the proxy\n"
-    printf "  ${C}delete${N} NAME [flags]             remove a record\n\n"
+    printf "  ${C}delete${N} NAME [flags]             remove a record\n"
+    printf "  ${C}site${N} NAME PORT [--dns-only]     DNS + Caddy, go live\n"
+    printf "  ${C}site remove${N} NAME [--keep-dns]   take a site down\n"
+    printf "  ${C}site list${N}                       show managed sites\n\n"
     printf "${W}Flags:${N} --type T  --priority N  --match TEXT\n"
-    printf "       --proxy  --dns-only\n\n"
+    printf "       --proxy  --dns-only  --keep-dns\n\n"
     printf "${D}NAME can be short (api), full (api.%s) or @ for root.${N}\n" "$ZONE" ;;
 esac
