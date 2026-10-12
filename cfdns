@@ -23,12 +23,12 @@ banner() {
 }
 res() { local j; j=$(cat); if [ "$(echo "$j" | jq -r '.success')" = "true" ]; then printf "${G}✓${N} %s\n" "$1"; else printf "${R}✗${N} Failed: %s\n" "$(echo "$j" | jq -r '.errors[0].message // "unknown error"')"; exit 1; fi; }
 mode() { if [ "$1" = "true" ]; then echo "proxied (orange cloud)"; else echo "DNS only (grey cloud)"; fi; }
+err() { printf "${R}✗${N} %s\n" "$1" >&2; exit 1; }
 
 cf() { curl -s -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H "Content-Type: application/json" "$@"; }
-rid() { cf "$API/zones/$Z/dns_records?name=$1" | jq -r '.result[0].id // empty'; }
 confirm() { read -rp "Are you sure you want to $1? (type yes to continue): " ans; [ "$ans" = "yes" ]; }
 
-PROXY=""; TYPE=""; POS=()
+PROXY=""; TYPE=""; PRIO=""; MATCH=""; POS=()
 parse() {
   POS=()
   while [ $# -gt 0 ]; do
@@ -36,6 +36,8 @@ parse() {
       --proxy|--proxied|-p) PROXY=true ;;
       --dns-only|--no-proxy|-d) PROXY=false ;;
       --type|-t) TYPE="${2:?--type needs a value}"; shift ;;
+      --priority|--prio) PRIO="${2:?--priority needs a number}"; shift ;;
+      --match|-m) MATCH="${2:?--match needs text}"; shift ;;
       *) POS+=("$1") ;;
     esac
     shift
@@ -43,15 +45,33 @@ parse() {
 }
 
 ZONE=$(cf "$API/zones/$Z" | jq -r '.result.name // empty')
-[ -z "$ZONE" ] && { printf "${R}✗${N} Could not read your zone. Re-run the installer to reset your token and Zone ID.\n"; exit 1; }
+[ -z "$ZONE" ] && err "Could not read your zone. Re-run the installer to reset your token and Zone ID."
 
 fqdn() {
   local n="${1,,}"; n="${n%.}"
   if [ "$n" = "@" ] || [ "$n" = "$ZONE" ]; then echo "$ZONE"
   elif [[ "$n" == *".$ZONE" ]]; then echo "$n"
   elif [[ "$n" != *.* ]]; then echo "$n.$ZONE"
-  else printf "${R}✗${N} Refusing: '%s' is outside your zone (%s).\n" "$1" "$ZONE" >&2; exit 1
+  else err "Refusing: '$1' is outside your zone ($ZONE)."
   fi
+}
+
+# rows of: id <TAB> type <TAB> content, filtered by --type and --match
+find() {
+  cf "$API/zones/$Z/dns_records?name=$1&per_page=100${TYPE:+&type=${TYPE^^}}" \
+    | jq -r --arg m "$MATCH" '.result[] | select($m=="" or (.content|contains($m))) | [.id,.type,.content] | @tsv'
+}
+# exactly one record, or stop and show the candidates
+pick() {
+  local rows n
+  rows=$(find "$1"); n=$(printf "%s" "$rows" | grep -c . || true)
+  if [ "$n" -eq 0 ]; then err "Not found: $1"
+  elif [ "$n" -gt 1 ]; then
+    printf "${R}✗${N} %s has %s matching records. Narrow it with --type and/or --match:\n" "$1" "$n" >&2
+    printf "%s\n" "$rows" | cut -f2,3 | sed 's/^/     /' >&2
+    exit 1
+  fi
+  printf "%s\n" "$rows"
 }
 
 case "${1:-}" in
@@ -60,49 +80,62 @@ case "${1:-}" in
     echo "Zone: $ZONE" ;;
   list)
     printf "${W}DNS records for %s${N}\n" "$ZONE"
-    cf "$API/zones/$Z/dns_records?per_page=100" | jq -r '.result[] | "\(.type)\t\(.name)\t\(.content)\t\(if .proxied then "proxied" else "dns-only" end)"' | { column -t -s $'\t' 2>/dev/null || cat; } ;;
+    cf "$API/zones/$Z/dns_records?per_page=100" | jq -r '.result[] | "\(.type)\t\(.name)\t\(.content)\t\(if .proxied then "proxied" else "dns-only" end)\t\(if .priority != null then "prio=\(.priority)" else "-" end)"' | { column -t -s $'\t' 2>/dev/null || cat; } ;;
   add)
     parse "${@:2}"
-    name=$(fqdn "${POS[0]:?usage: cfdns add NAME [IP] [--proxy|--dns-only] [--type TYPE]}")
-    type=${TYPE:-A}
-    content=${POS[1]:-$(curl -s https://api.ipify.org)}
+    name=$(fqdn "${POS[0]:?usage: cfdns add NAME [VALUE] [--type T] [--priority N] [--proxy|--dns-only]}")
+    type=${TYPE:-A}; type=${type^^}
+    if [ -n "${POS[1]:-}" ]; then content=${POS[1]}
+    elif [ "$type" = "A" ]; then content=$(curl -s https://api.ipify.org)
+    else err "$type records need a value, e.g. cfdns add NAME \"value\" --type $type"
+    fi
     if [ -n "$PROXY" ]; then proxied=$PROXY; else case "$type" in A|AAAA|CNAME) proxied=true ;; *) proxied=false ;; esac; fi
-    cf -X POST "$API/zones/$Z/dns_records" --data "$(jq -n --arg t "$type" --arg n "$name" --arg c "$content" --argjson p "$proxied" '{type:$t,name:$n,content:$c,proxied:$p,ttl:1}')" | res "Added $name → $content [$(mode "$proxied")]" ;;
+    case "$type" in A|AAAA|CNAME) ;; *) [ "$proxied" = true ] && err "$type records cannot be proxied" ;; esac
+    prio=$PRIO; [ "$type" = "MX" ] && prio=${prio:-10}
+    body=$(jq -n --arg t "$type" --arg n "$name" --arg c "$content" --argjson p "$proxied" --arg pr "$prio" \
+      '{type:$t,name:$n,content:$c,proxied:$p,ttl:1} + (if $pr != "" then {priority:($pr|tonumber)} else {} end)')
+    extra=""; [ -n "$prio" ] && extra=" (priority $prio)"
+    cf -X POST "$API/zones/$Z/dns_records" --data "$body" | res "Added $type $name → $content$extra" ;;
   update)
     parse "${@:2}"
-    name=$(fqdn "${POS[0]:?usage: cfdns update NAME CONTENT [--proxy|--dns-only]}"); content=${POS[1]:?missing CONTENT}
-    confirm "update $name to $content" || { echo "Cancelled."; exit 1; }
-    id=$(rid "$name"); [ -z "$id" ] && { printf "${R}✗${N} Not found: %s\n" "$name"; exit 1; }
+    name=$(fqdn "${POS[0]:?usage: cfdns update NAME NEWVALUE [--type T] [--match TEXT] [--priority N] [--proxy|--dns-only]}")
+    content=${POS[1]:?missing NEW VALUE}
+    IFS=$'\t' read -r id rtype rcontent <<< "$(pick "$name")"
+    confirm "update $rtype $name ($rcontent) to $content" || { echo "Cancelled."; exit 1; }
     body=$(jq -n --arg c "$content" '{content:$c}')
     [ -n "$PROXY" ] && body=$(echo "$body" | jq --argjson p "$PROXY" '. + {proxied:$p}')
-    cf -X PATCH "$API/zones/$Z/dns_records/$id" --data "$body" | res "Updated $name → $content" ;;
+    [ -n "$PRIO" ] && body=$(echo "$body" | jq --argjson p "$PRIO" '. + {priority:$p}')
+    cf -X PATCH "$API/zones/$Z/dns_records/$id" --data "$body" | res "Updated $rtype $name → $content" ;;
   proxy)
-    name=$(fqdn "${2:?usage: cfdns proxy NAME [on|off]}")
-    rec=$(cf "$API/zones/$Z/dns_records?name=$name" | jq -c '.result[0] // empty')
-    [ -z "$rec" ] && { printf "${R}✗${N} Not found: %s\n" "$name"; exit 1; }
-    id=$(echo "$rec" | jq -r '.id'); cur=$(echo "$rec" | jq -r '.proxied')
-    case "${3:-}" in
+    parse "${@:2}"
+    name=$(fqdn "${POS[0]:?usage: cfdns proxy NAME [on|off] [--type T]}")
+    TYPE=${TYPE:-A}
+    IFS=$'\t' read -r id rtype rcontent <<< "$(pick "$name")"
+    cur=$(cf "$API/zones/$Z/dns_records/$id" | jq -r '.result.proxied')
+    case "${POS[1]:-}" in
       on|true|proxy) want=true ;;
       off|false|dns) want=false ;;
       "") printf "%s is %s\n" "$name" "$(mode "$cur")"; exit 0 ;;
-      *) printf "${R}✗${N} Use: cfdns proxy NAME on|off\n"; exit 1 ;;
+      *) err "Use: cfdns proxy NAME on|off" ;;
     esac
     cf -X PATCH "$API/zones/$Z/dns_records/$id" --data "$(jq -n --argjson p "$want" '{proxied:$p}')" | res "$name is now $(mode "$want")" ;;
   delete)
-    name=$(fqdn "${2:?usage: cfdns delete NAME}")
-    confirm "delete $name" || { echo "Cancelled."; exit 1; }
-    id=$(rid "$name"); [ -z "$id" ] && { printf "${R}✗${N} Not found: %s\n" "$name"; exit 1; }
-    cf -X DELETE "$API/zones/$Z/dns_records/$id" | res "Deleted $name" ;;
+    parse "${@:2}"
+    name=$(fqdn "${POS[0]:?usage: cfdns delete NAME [--type T] [--match TEXT]}")
+    IFS=$'\t' read -r id rtype rcontent <<< "$(pick "$name")"
+    confirm "delete $rtype $name ($rcontent)" || { echo "Cancelled."; exit 1; }
+    cf -X DELETE "$API/zones/$Z/dns_records/$id" | res "Deleted $rtype $name" ;;
   *)
     banner
     echo
     printf "${W}Usage:${N} cfdns <command>\n\n"
-    printf "  ${C}verify${N}                         check token and zone\n"
-    printf "  ${C}list${N}                           show all records\n"
-    printf "  ${C}add${N} NAME [IP] [flags]           create a record\n"
-    printf "  ${C}update${N} NAME CONTENT [flags]    change a record\n"
-    printf "  ${C}proxy${N} NAME [on|off]            show or switch the proxy\n"
-    printf "  ${C}delete${N} NAME                    remove a record\n\n"
-    printf "${W}Flags:${N} --proxy  --dns-only  --type TYPE\n\n"
+    printf "  ${C}verify${N}                          check token and zone\n"
+    printf "  ${C}list${N}                            show all records\n"
+    printf "  ${C}add${N} NAME [VALUE] [flags]         create a record\n"
+    printf "  ${C}update${N} NAME NEWVALUE [flags]    change a record\n"
+    printf "  ${C}proxy${N} NAME [on|off]             show or switch the proxy\n"
+    printf "  ${C}delete${N} NAME [flags]             remove a record\n\n"
+    printf "${W}Flags:${N} --type T  --priority N  --match TEXT\n"
+    printf "       --proxy  --dns-only\n\n"
     printf "${D}NAME can be short (api), full (api.%s) or @ for root.${N}\n" "$ZONE" ;;
 esac
