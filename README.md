@@ -83,8 +83,9 @@ cfdns list            # show all records
 | `cfdns update NAME NEWVALUE [flags]` | Changes a record (asks to confirm) |
 | `cfdns proxy NAME [on\|off]` | Shows or switches the proxy |
 | `cfdns delete NAME [flags]` | Removes a record (asks to confirm) |
-| `cfdns site NAME PORT` | Creates the DNS record and Caddy config in one step |
+| `cfdns site NAME PORT [--proxy]` | Creates the DNS record and Caddy config and gets the HTTPS certificate |
 | `cfdns site list` / `site remove NAME` | Shows or removes sites managed by cfdns |
+| `cfdns cert NAME [--retry]` | Checks the HTTPS certificate, or restarts Caddy to retry it |
 
 ### Flags
 
@@ -212,37 +213,37 @@ If Caddy can't get its certificate on a brand-new domain, turn the proxy off for
 
 ## Making a subdomain live
 
-One command creates the DNS record, adds the Caddy config, checks it, and reloads Caddy:
+One command creates the DNS record, adds the Caddy config, and gets the HTTPS certificate:
 
 ```bash
 cfdns site myapp 3001
 ```
 
-That makes `myapp.yourdomain.com` serve whatever app is running on port 3001.
+The steps, in order:
+
+1. **DNS:** creates the A record as DNS only (grey cloud), so the certificate can be issued
+2. **Caddy:** adds the reverse-proxy block, validates it, and reloads (rolls back automatically if Caddy rejects it)
+3. **Certificate:** waits for a valid HTTPS certificate, or shows why it isn't ready (for example a Let's Encrypt rate limit)
 
 ```bash
-cfdns site myapp 3001 --dns-only    # grey cloud instead of proxied
-cfdns site list                     # show sites managed by cfdns
-cfdns site remove myapp             # remove the Caddy block and the DNS record
-cfdns site remove myapp --keep-dns  # remove only the Caddy block
+cfdns site myapp 3001 --proxy    # switch to the orange cloud once the certificate works
+cfdns site list                  # show sites managed by cfdns
+cfdns site remove myapp          # remove the Caddy block and the DNS record
+cfdns site remove myapp --keep-dns
 ```
 
-**Requirements:** Caddy installed (`apt install -y caddy`), ports 80 and 443 open on your server, and Cloudflare **SSL/TLS** set to **Full (strict)** (see [Cloudflare SSL/TLS settings](#cloudflare-ssltls-settings)).
+With `--proxy`, the orange cloud is only turned on after the certificate works. `cfdns` then tests the proxied site, and if Cloudflare redirects it to another host (a Redirect Rule or Workers Route on your zone), it reverts to DNS only and tells you.
 
-**Safety:** `site` asks for confirmation, backs up the Caddyfile to `/etc/caddy/Caddyfile.cfdns.bak`, validates the new config before reloading, and rolls back automatically if Caddy rejects it. It never overwrites an existing hostname or DNS record. Blocks it creates are wrapped in `# cfdns:begin` and `# cfdns:end` markers, so it only removes what it added.
+### Certificates
 
-### Doing it by hand
+```bash
+cfdns cert myapp            # issuer, expiry date, days left
+cfdns cert myapp --retry    # restart Caddy and retry issuing
+```
 
-If you prefer manual steps:
+Caddy renews certificates automatically. If a certificate fails, check that the record is DNS only and that ports 80 and 443 are open. Let's Encrypt allows 5 failed validations per name per hour, so after repeated failures wait for the time shown in the error.
 
-1. `cfdns add myapp`
-2. Add to `/etc/caddy/Caddyfile`:
-   ```
-   myapp.yourdomain.com {
-       reverse_proxy localhost:3001
-   }
-   ```
-3. `systemctl reload caddy`
+**Requirements:** Caddy installed (`apt install -y caddy`), ports 80 and 443 open, and Cloudflare **SSL/TLS** set to **Full (strict)** (see [Cloudflare SSL/TLS settings](#cloudflare-ssltls-settings)).
 
 ## Updating
 
