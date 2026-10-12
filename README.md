@@ -152,6 +152,58 @@ If you don't narrow it down, `cfdns` lists the candidates and stops.
 - **No guessing:** if more than one record matches, nothing is changed.
 - **Proxy rules:** only A, AAAA, and CNAME records can be proxied. Other types are always DNS only.
 
+## Cloudflare SSL/TLS settings
+
+`cfdns` only manages DNS records. SSL/TLS settings are changed in the Cloudflare dashboard, because the API token only has DNS permission. They matter when a record is **proxied** (orange cloud). DNS-only (grey cloud) records bypass Cloudflare, so your server's own certificate is all that counts.
+
+### 1. Encryption mode
+
+Go to **SSL/TLS → Overview** and choose:
+
+| Mode | What it does | Use it? |
+|---|---|---|
+| Off | No encryption at all | No |
+| Flexible | Encrypted to the visitor, **plain HTTP to your server** | No. Causes "too many redirects" with Caddy or Nginx |
+| Full | Encrypted to your server, any certificate accepted (even self-signed) | Only as a temporary fallback |
+| **Full (strict)** | Encrypted to your server, certificate must be valid and trusted | **Yes, recommended** |
+
+Caddy gets a free trusted certificate (Let's Encrypt) for every domain in your Caddyfile automatically, so **Full (strict)** works with no extra setup.
+
+### 2. Edge Certificates
+
+Go to **SSL/TLS → Edge Certificates** and set:
+
+| Setting | Value | Why |
+|---|---|---|
+| Always Use HTTPS | On | Redirects `http://` visitors to `https://` |
+| Minimum TLS Version | TLS 1.2 | Blocks old, insecure clients |
+| Automatic HTTPS Rewrites | On | Fixes mixed-content links on your pages |
+| HSTS | Optional | Forces browsers to use HTTPS. Only enable once HTTPS works everywhere, because it is hard to undo |
+
+### Optional: Cloudflare Origin Certificate
+
+Instead of Caddy's automatic certificate, you can create a 15-year certificate under **SSL/TLS → Origin Server → Create Certificate**, save the two files on your server, and point Caddy at them:
+
+```
+myapp.yourdomain.com {
+    tls /etc/ssl/cloudflare/cert.pem /etc/ssl/cloudflare/key.pem
+    reverse_proxy localhost:3001
+}
+```
+
+This certificate is trusted by Cloudflare only, so it works for proxied records but not for DNS-only ones.
+
+### SSL error codes
+
+| Code | Meaning | Fix |
+|---|---|---|
+| 521 | Server refused the connection | Check Caddy is running and ports 80/443 are open |
+| 525 | SSL handshake failed | Your server has no valid HTTPS setup. Check Caddy's logs |
+| 526 | Invalid certificate (Full strict) | Wait for Caddy to finish getting its certificate, or use a valid origin certificate |
+| Too many redirects | Mode is Flexible | Switch to Full (strict) |
+
+If Caddy can't get its certificate on a brand-new domain, turn the proxy off for a minute (`cfdns proxy myapp off`), let Caddy get the certificate, then turn it back on (`cfdns proxy myapp on`).
+
 ## Making a subdomain live (example with Caddy)
 
 DNS only points visitors to your server. To serve an app on `myapp.yourdomain.com`:
@@ -170,7 +222,7 @@ DNS only points visitors to your server. To serve an app on `myapp.yourdomain.co
    ```bash
    systemctl reload caddy
    ```
-4. In Cloudflare, set **SSL/TLS** to **Full (strict)**.
+4. In Cloudflare, set **SSL/TLS** to **Full (strict)** (see [Cloudflare SSL/TLS settings](#cloudflare-ssltls-settings)).
 
 Make sure ports 80 and 443 are open in your server firewall.
 
@@ -199,6 +251,7 @@ rm /usr/local/bin/cfdns /root/.cfdns.env
 | `502` after going live | The app is not running on that port. Check `pm2 status` |
 | `521` | Cloudflare can't reach your server. Check Caddy and ports 80/443 |
 | `525` / `526` | SSL mode mismatch. Use Full (strict) with a valid certificate on the server |
+| "Too many redirects" | SSL mode is Flexible. Switch to Full (strict) |
 
 ## Limitations
 
